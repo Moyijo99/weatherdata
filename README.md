@@ -199,4 +199,23 @@ This project is provided as **portfolio sample code**. Use and modify freely; ad
 
 Built as a **data engineering / analytics engineering** portfolio piece: ingestion → BigQuery → dbt → tested, documented marts.
 
-If you use this template, replace the clone URL above with your real GitHub repository path after you push.
+If you use this template, replace the clone URL in **Quick start** with your real GitHub repository path after you push.
+
+---
+
+## Publishing to GitHub
+
+From the project root (after `git init` and your first commit):
+
+1. Create a **new empty repository** on GitHub (**no** README, license, or `.gitignore` if you want to avoid merge conflicts).
+2. Add the remote and push:
+
+```bash
+git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
+git branch -M main
+git push -u origin main
+```
+
+Use the SSH form if you prefer: `git@github.com:YOUR_USERNAME/YOUR_REPO_NAME.git`
+
+3. Edit this README and set the clone URL in **Quick start** to your public URL.
