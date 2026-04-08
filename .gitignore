@@ -1,0 +1,36 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# dbt
+target/
+dbt_packages/
+logs/
+*.log
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*-credentials.json
+*-service-account*.json
+meteo-ingest*.json
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Legacy nested dbt starter (canonical project is repo root)
+weather_abuja_pl/

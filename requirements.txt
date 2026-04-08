@@ -1,0 +1,6 @@
+# Python ingest
+requests>=2.28,<3
+google-cloud-bigquery>=3.41,<4
+
+# dbt (BigQuery)
+dbt-bigquery>=1.11,<2

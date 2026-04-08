@@ -1,0 +1,57 @@
+version: 2
+
+models:
+  - name: stg_weatherdata_raw
+    description: >
+      Hourly Abuja *forecast* rows from Open-Meteo (not ground-truth observations).
+      Typed columns; one row per observed_at (latest ingested_at wins on duplicates).
+    columns:
+      - name: observed_at
+        description: Forecast validity time as timestamp (hour start; API timezone Africa/Lagos).
+        tests:
+          - not_null
+      - name: temperature_c
+        description: Air temperature at 2m (°C).
+        tests:
+          - not_null
+      - name: precipitation_mm
+        description: Hourly precipitation (mm).
+        tests:
+          - not_null
+      - name: windspeed_kmh
+        description: Wind speed at 10m (km/h).
+        tests:
+          - not_null
+      - name: ingested_at
+        description: When the row was loaded into BigQuery.
+        tests:
+          - not_null
+
+  - name: mart_daily_forecast
+    description: >
+      Daily rollups of hourly *forecast* data (Lagos calendar days).
+      Risk bands are illustrative thresholds on summed hourly precipitation.
+    columns:
+      - name: date_day
+        description: Calendar date in Africa/Lagos derived from observed_at.
+        tests:
+          - not_null
+          - unique
+      - name: avg_temperature_c
+        description: Daily mean forecast temperature (°C).
+      - name: max_temperature_c
+        description: Daily max forecast temperature (°C).
+      - name: total_precipitation_mm
+        description: Sum of hourly forecast precipitation for the Lagos day (mm).
+      - name: max_windspeed_kmh
+        description: Daily max forecast wind speed (km/h).
+      - name: precipitation_risk
+        description: Categorical band from daily total precipitation (forecast).
+        tests:
+          - accepted_values:
+              arguments:
+                values:
+                  - "High Risk"
+                  - "Moderate Risk"
+                  - "Low Risk"
+                  - "No Risk"

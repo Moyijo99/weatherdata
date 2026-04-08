@@ -1,0 +1,27 @@
+name: "weather_abuja_pl"
+version: "1.0.0"
+config-version: 2
+
+profile: "weather_abuja_pl"
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Set to false after raw.abuja_hourly uses column `temperature_c` (rename or new ingest only).
+vars:
+  legacy_raw_temperature_column: true
+
+models:
+  weather_abuja_pl:
+    staging:
+      +materialized: view
+    mart:
+      +materialized: table
