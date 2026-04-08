@@ -1,20 +1,23 @@
-# Abuja Weather Forecast Pipeline
+# Abuja Weather Intelligence Pipeline
 
-End-to-end **data pipeline** that ingests hourly **weather forecast** data for Abuja, Nigeria (Open-Meteo), loads it into **Google BigQuery**, and transforms it with **dbt** into staging and mart models—with **tests**, **deduplication**, and **Lagos-local** daily aggregations.
-
-This repository is structured as a **portfolio-ready** example of modern analytics engineering: Python ingestion, cloud warehouse, version-controlled SQL, and declarative tests.
+> **Business problem:** Logistics operators, agricultural planners, and field operations teams in Nigeria make daily decisions affected by weather — but there is no centralized, queryable, historically-accumulating weather store for Nigerian cities. This pipeline creates one, and surfaces a daily operational risk signal on top of it.
 
 ---
 
-## Highlights
+## What This Project Actually Does
 
-| Area | What this project shows |
-|------|-------------------------|
-| **Ingestion** | Python + Open-Meteo API + BigQuery streaming inserts |
-| **Warehouse** | BigQuery (project / dataset / table) |
-| **Transformations** | dbt: staging view → mart table, `schema.yml` docs & tests |
-| **Data quality** | `not_null`, `unique`, `accepted_values`, source **freshness** config |
-| **Semantics** | Forecast vs observation called out; **Africa/Lagos** calendar days; duplicate-hour handling |
+Every hour, this pipeline:
+
+1. Fetches hourly forecast data for Abuja from the Open-Meteo API
+2. Streams it into a raw BigQuery table — untouched, exactly as received
+3. Runs dbt transformations that clean, deduplicate, and roll up the data into a mart table
+4. Produces a `logistics_risk_level` signal per calendar day (`Low`, `Moderate`, or `High Risk`) based on precipitation thresholds — a concrete, business-interpretable output, not just raw numbers
+
+The mart table is designed to answer questions like:
+
+- *How many high-risk weather days has Abuja had this month?*
+- *Which days last week were safe for outdoor field operations?*
+- *What is the seasonal precipitation pattern across the year?*
 
 ---
 
@@ -24,99 +27,182 @@ This repository is structured as a **portfolio-ready** example of modern analyti
 flowchart LR
     subgraph ingest [Ingestion]
         API[Open-Meteo API]
-        PY[Python ingest.py]
+        PY[ingest.py]
         API --> PY
     end
-    subgraph gcp [Google Cloud]
-        BQ[(BigQuery: raw.abuja_hourly)]
-        PY -->|insert_rows_json| BQ
+
+    subgraph gcp [Google Cloud / BigQuery]
+        RAW[(weather_data.abuja_hourly\nRaw — append-only, never modified)]
+        PY -->|insert_rows_json| RAW
     end
-    subgraph dbt [dbt transformations]
-        STG[stg_weatherdata_raw]
-        MART[mart_daily_forecast]
-        BQ --> STG
+
+    subgraph dbt [dbt Transformation Layer]
+        STG[stg_weatherdata_raw\nStaging view\nTyped · Deduplicated · Null-filtered]
+        MART[mart_daily_forecast\nMart table\nDaily aggregates · Risk bands]
+        RAW --> STG
         STG --> MART
     end
 ```
 
-- **Raw**: `weather_data.abuja_hourly` — hourly rows from the forecast API (temperature, precipitation, wind, timestamps).
-- **Staging** (`stg_weatherdata_raw`): Typed columns, null-time filter, **one row per `observed_at`** (latest `ingested_at` wins).
-- **Mart** (`mart_daily_forecast`): Daily rollups by **Lagos calendar date**, aggregates, and a simple precipitation **risk band** for dashboards or downstream use.
+### Why this architecture?
+
+| Decision | Rationale |
+|---|---|
+| **Raw table is append-only** | Preserves source truth. If transformation logic changes, the raw data can be reprocessed without re-fetching from the API. This is a foundational production pattern. |
+| **Staging as a view, mart as a table** | Staging is cheap to recompute and doesn't need to be stored. The mart is queried by downstream consumers and benefits from materialisation. |
+| **BigQuery over Postgres** | This is an analytical workload — columnar storage and serverless scaling make BigQuery the right fit. Postgres would work at this volume but introduces infrastructure management with no benefit. |
+| **dbt over raw SQL scripts** | Version-controlled, testable, self-documenting transformations. Every model is a node in a DAG with lineage you can inspect. |
+| **Africa/Lagos timezone for daily grain** | Daily rollups bucketed in UTC would misalign with local operational decisions. `DATE(observed_at, 'Africa/Lagos')` ensures the date means what a Nigerian operator would expect it to mean. |
 
 ---
 
-## Tech stack
+## Real-World Challenges Handled
 
-- **Python 3.11+** (3.13 used in development)
-- **requests** — HTTP to Open-Meteo
-- **google-cloud-bigquery** — load to BigQuery
-- **dbt Core** + **dbt-bigquery** — models, tests, documentation in YAML
-- **GCP** — BigQuery + service account authentication
+This is not a clean-dataset tutorial. The pipeline was designed with production constraints in mind:
+
+### 1. Duplicate hours from re-runs
+The Open-Meteo forecast API returns overlapping windows — re-running ingestion inserts duplicate rows for the same hour. The staging model handles this with a deduplication strategy: for any given `observed_at`, only the latest `ingested_at` row survives. Downstream models always see exactly one row per hour.
+
+```sql
+-- Deduplication in stg_weatherdata_raw
+qualify row_number() over (
+    partition by observed_at
+    order by ingested_at desc
+) = 1
+```
+
+### 2. Legacy column naming (schema drift)
+The raw table was initially loaded with a typo in the column name (`temprature_c` instead of `temperature_c`). Rather than requiring a manual fix before the pipeline could run, a feature flag in `dbt_project.yml` handles both states:
+
+```yaml
+# dbt_project.yml
+vars:
+  legacy_raw_temperature_column: true   # set false after column rename
+```
+
+The staging model reads the right column name based on this flag. This simulates a real-world schema evolution scenario and shows the pipeline degrades gracefully rather than breaking.
+
+### 3. Forecast data, not observations
+The Open-Meteo API returns **forecast** data, not historical station observations. This distinction matters — forecast values for a past hour may differ from what actually occurred. The mart is named `mart_daily_forecast` deliberately, and this is documented in the data model so any downstream consumer understands what they're querying.
 
 ---
 
-## Repository layout
+## Data Models
+
+### `stg_weatherdata_raw` (view)
+
+Reads from `weather_data.abuja_hourly`. Applies:
+- Type casting on all columns
+- Null filter on `observed_at`
+- Deduplication by `observed_at` (latest ingestion wins)
+- Derives `date_day` in Africa/Lagos timezone
+
+### `mart_daily_forecast` (table)
+
+Daily grain. One row per Lagos calendar date.
+
+| Column | Description |
+|---|---|
+| `date_day` | Calendar date (Africa/Lagos) |
+| `avg_temp_c` | Mean hourly temperature |
+| `max_temp_c` | Peak temperature |
+| `min_temp_c` | Minimum temperature |
+| `total_precipitation_mm` | Sum of hourly precipitation |
+| `max_windspeed_kmh` | Peak wind speed |
+| `logistics_risk_level` | `Low Risk` / `Moderate Risk` / `High Risk` |
+
+**Risk logic:**
+```sql
+case
+    when total_precipitation_mm > 20 then 'High Risk'
+    when total_precipitation_mm > 5  then 'Moderate Risk'
+    else 'Low Risk'
+end as logistics_risk_level
+```
+
+---
+
+## Data Quality
+
+Tests are defined in `models/schema.yml` and enforced with `dbt test`:
+
+| Test | Column | Model |
+|---|---|---|
+| `not_null` | `observed_at`, `temperature_c`, `precipitation_mm` | Staging |
+| `unique` | `observed_at` | Staging |
+| `not_null` | `date_day` | Mart |
+| `unique` | `date_day` | Mart |
+| `accepted_values` | `logistics_risk_level` | Mart |
+| Source freshness | `ingested_at` on `raw.abuja_hourly` | Source |
+
+Source freshness is configured in `_sources.yml` — `dbt source freshness` will warn if the raw table hasn't received data within a defined window, catching silent ingestion failures before they reach the mart.
+
+---
+
+## Tech Stack
+
+| Layer | Tool |
+|---|---|
+| Data source | [Open-Meteo API](https://open-meteo.com/) (free, no auth required) |
+| Ingestion | Python 3.13, `requests`, `google-cloud-bigquery` |
+| Warehouse | Google BigQuery |
+| Transformation | dbt Core + dbt-bigquery |
+| Auth | GCP Service Account (JSON key, never committed) |
+
+---
+
+## Repository Layout
 
 ```
 weatherdataabuja/
-├── ingest.py                 # Fetch forecast + stream to BigQuery
-├── requirements.txt          # Python + dbt dependencies
-├── dbt_project.yml           # dbt project + model materializations
+├── ingest.py                               # Fetch + stream to BigQuery
+├── requirements.txt
+├── dbt_project.yml                         # dbt config + feature flags
 ├── models/
 │   ├── staging/
 │   │   ├── stg_weatherdata_raw.sql
-│   │   └── _sources.yml      # raw source + freshness
+│   │   └── _sources.yml                   # Raw source + freshness config
 │   ├── mart/
 │   │   └── mart_daily_forecast.sql
-│   └── schema.yml            # column docs + generic tests
+│   └── schema.yml                          # Column docs + generic tests
 ├── analyses/
-│   └── rename_raw_temperature_column.sql   # optional one-time BQ DDL (commented)
-└── weather_abuja.csv         # sample export (optional reference)
+│   └── rename_raw_temperature_column.sql  # One-time DDL for column rename
+└── weather_abuja.csv                       # Sample export for reference
 ```
 
-> **Note:** `dbt` reads **`~/.dbt/profiles.yml`** for your BigQuery connection (not committed). The **`target/`** and **`logs/`** directories are gitignored.
-
 ---
 
-## Prerequisites
+## Getting Started
 
-1. **Google Cloud** project with BigQuery enabled  
-2. **Service account** with BigQuery Data Editor (or equivalent) on the target dataset  
-3. **JSON key** for that account (keep it **out of git**; use env vars)  
-4. **Python 3.11+** and optionally a virtual environment  
-5. **dbt** profile for BigQuery (see below)
+### Prerequisites
 
----
+- Google Cloud project with BigQuery enabled
+- Service account with `BigQuery Data Editor` on the target dataset
+- Service account JSON key (**never commit this**)
+- Python 3.11+
 
-## Quick start
-
-### 1. Clone and virtual environment
+### 1. Clone and install
 
 ```bash
-git clone https://github.com/<your-username>/<your-repo>.git
-cd <your-repo>
+git clone https://github.com/<your-username>/weatherdataabuja.git
+cd weatherdataabuja
 python3 -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Google credentials (ingest)
-
-Do **not** commit key files. Point the SDK at your key file:
+### 2. Set credentials
 
 ```bash
 export GOOGLE_APPLICATION_CREDENTIALS="/absolute/path/to/your-service-account.json"
-```
 
-Optional: override the default table (defaults to `meteo-ingest.weather_data.abuja_hourly`):
-
-```bash
+# Optional: override the default destination table
 export BIGQUERY_TABLE_ID="your-project.your_dataset.abuja_hourly"
 ```
 
-### 3. dbt profile
+### 3. Configure dbt profile
 
-Create **`~/.dbt/profiles.yml`** (or merge into it) with a target named to match **`profile: weather_abuja_pl`** in `dbt_project.yml`, for example:
+Create or update `~/.dbt/profiles.yml`:
 
 ```yaml
 weather_abuja_pl:
@@ -127,95 +213,50 @@ weather_abuja_pl:
       method: service-account
       project: your-gcp-project-id
       dataset: weather_data
-      location: US   # or your dataset location
+      location: US
       keyfile: /absolute/path/to/your-service-account.json
       threads: 4
 ```
 
-Adjust **`project`**, **`dataset`**, **`location`**, and **`keyfile`** to match your environment. Align **`models/staging/_sources.yml`** `database` / `schema` with your raw table’s project and dataset.
+Update `database` and `schema` in `models/staging/_sources.yml` to match your project and dataset.
 
-### 4. Raw table column (temperature)
+### 4. Handle the legacy column (if applicable)
 
-If the raw table still has the legacy column name `temprature_c`, keep **`legacy_raw_temperature_column: true`** in `dbt_project.yml`. After you rename the column to **`temperature_c`** in BigQuery (see `analyses/rename_raw_temperature_column.sql`), set it to **`false`**.
+If your raw table still has `temprature_c` (the typo), leave `legacy_raw_temperature_column: true` in `dbt_project.yml`. After renaming the column (see `analyses/rename_raw_temperature_column.sql`), set it to `false`.
 
-### 5. Run ingestion
+### 5. Run the pipeline
 
 ```bash
+# Ingest
 python ingest.py
-```
 
-### 6. Run dbt
-
-```bash
-dbt deps          # if you add packages later
+# Transform
 dbt run
+
+# Test
 dbt test
-dbt source freshness   # optional: checks loaded_at_field on raw
+
+# Check source freshness
+dbt source freshness
 ```
 
 ---
 
-## Configuration reference
+## What's Next
 
-| Item | Purpose |
-|------|---------|
-| `GOOGLE_APPLICATION_CREDENTIALS` | Path to GCP service account JSON (ingest + often dbt) |
-| `BIGQUERY_TABLE_ID` | Override destination table for `ingest.py` |
-| `legacy_raw_temperature_column` (`dbt_project.yml`) | Read legacy `temprature_c` vs `temperature_c` in staging |
-| `models/staging/_sources.yml` | BigQuery `database` / `schema` for `source('raw', 'abuja_hourly')` |
+The current state of the project is a working ingestion and transformation layer with tests. The planned next phases are:
 
----
+**Orchestration** — wrapping the pipeline in an Airflow DAG (via Astronomer) so ingestion and dbt runs are scheduled, monitored, and retried automatically. A cron job would work at this scale, but Airflow gives visibility into failures and makes the dependency chain (`ingest → dbt run → dbt test`) explicit.
 
-## Data & modeling notes
+**Pre-load data quality with Great Expectations** — validating the API response *before* it touches BigQuery. The current dbt tests catch problems after load; GE would add a gate at the ingestion boundary, which is the right place to stop bad data early.
 
-- **Forecast data**: Open-Meteo **forecast** API — this is **not** historical station observations. The mart is named **`mart_daily_forecast`** accordingly.
-- **Daily grain**: `date_day` uses **`DATE(observed_at, 'Africa/Lagos')`** so daily buckets match **local (Lagos) dates**.
-- **Duplicates**: Re-running ingest can insert overlapping hours; staging **deduplicates** by `observed_at`, keeping the latest `ingested_at`.
+**BI layer** — a Looker Studio dashboard connected to `mart_daily_forecast`, surfacing the logistics risk signal visually. The mart is already structured for this; the dashboard is the delivery mechanism for the business value the pipeline produces.
 
----
-
-## Tests (dbt)
-
-Defined in **`models/schema.yml`**: `not_null`, `unique` (on `date_day`), `accepted_values` for risk labels, plus **source freshness** on `raw.abuja_hourly` via `ingested_at`.
-
----
-
-## Roadmap / ideas
-
-- [ ] Orchestration (Airflow, Cloud Composer, or GitHub Actions cron)
-- [ ] Historical vs forecast split or archive API
-- [ ] Dashboard (Looker Studio, Metabase, or Streamlit)
-- [ ] Incremental mart or partition strategy as volume grows
-
----
-
-## License
-
-This project is provided as **portfolio sample code**. Use and modify freely; add a license file (e.g. MIT) if you want standard open-source terms.
+**Incremental models** — as the raw table grows, a full-refresh mart becomes expensive. The next modeling step is converting `mart_daily_forecast` to an incremental model that only reprocesses recent data.
 
 ---
 
 ## Author
 
-Built as a **data engineering / analytics engineering** portfolio piece: ingestion → BigQuery → dbt → tested, documented marts.
-
-If you use this template, replace the clone URL in **Quick start** with your real GitHub repository path after you push.
-
----
-
-## Publishing to GitHub
-
-From the project root (after `git init` and your first commit):
-
-1. Create a **new empty repository** on GitHub (**no** README, license, or `.gitignore` if you want to avoid merge conflicts).
-2. Add the remote and push:
-
-```bash
-git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
-git branch -M main
-git push -u origin main
-```
-
-Use the SSH form if you prefer: `git@github.com:YOUR_USERNAME/YOUR_REPO_NAME.git`
-
-3. Edit this README and set the clone URL in **Quick start** to your public URL.
+Built as a data engineering and analytics engineering portfolio project.
+Covers the full analytical stack: REST ingestion → cloud warehouse → transformation layer → declarative testing → business-interpretable output.
