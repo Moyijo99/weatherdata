@@ -9,9 +9,9 @@
 Every hour, this pipeline:
 
 1. Fetches hourly forecast data for Abuja from the Open-Meteo API
-2. Streams it into a raw BigQuery table — untouched, exactly as received
+2. Streams it into a raw BigQuery table exactly as received
 3. Runs dbt transformations that clean, deduplicate, and roll up the data into a mart table
-4. Produces a `logistics_risk_level` signal per calendar day (`Low`, `Moderate`, or `High Risk`) based on precipitation thresholds — a concrete, business-interpretable output, not just raw numbers
+4. Produces a `logistics_risk_level` signal per calendar day (`Low`, `Moderate`, or `High Risk`) based on precipitation levels
 
 The mart table is designed to answer questions like:
 
@@ -246,13 +246,11 @@ dbt source freshness
 
 The current state of the project is a working ingestion and transformation layer with tests. The planned next phases are:
 
-**Orchestration** — wrapping the pipeline in an Airflow DAG (via Astronomer) so ingestion and dbt runs are scheduled, monitored, and retried automatically. A cron job would work at this scale, but Airflow gives visibility into failures and makes the dependency chain (`ingest → dbt run → dbt test`) explicit.
+**Orchestration** — wrapping the pipeline in an Airflow DAG (via Astronomer) so ingestion and dbt runs are scheduled, monitored, and retried automatically.
 
 **Pre-load data quality with Great Expectations** — validating the API response *before* it touches BigQuery. The current dbt tests catch problems after load; GE would add a gate at the ingestion boundary, which is the right place to stop bad data early.
 
 **BI layer** — a Looker Studio dashboard connected to `mart_daily_forecast`, surfacing the logistics risk signal visually. The mart is already structured for this; the dashboard is the delivery mechanism for the business value the pipeline produces.
-
-**Incremental models** — as the raw table grows, a full-refresh mart becomes expensive. The next modeling step is converting `mart_daily_forecast` to an incremental model that only reprocesses recent data.
 
 ---
 
