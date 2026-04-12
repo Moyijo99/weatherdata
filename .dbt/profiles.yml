@@ -1,0 +1,12 @@
+weather_abuja_pl:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: service-account
+      project: meteo-ingest
+      dataset: weather_data
+      keyfile: /usr/local/airflow/meteo-ingest-ce3765c5326f.json
+      location: US
+      threads: 4
+      timeout_seconds: 300

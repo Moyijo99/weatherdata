@@ -3,7 +3,7 @@ from datetime import datetime
 from google.cloud import bigquery
 import os
 
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/Users/mac/Desktop/weatherdataabuja/meteo-ingest-ce3765c5326f.json"
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/usr/local/airflow/meteo-ingest-ce3765c5326f.json"
 
 TABLE_ID = "meteo-ingest.weather_data.abuja_hourly"
 

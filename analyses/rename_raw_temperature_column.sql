@@ -2,7 +2,7 @@
 -- Run in the BigQuery console when you are ready to align the raw table with `temperature_c`.
 --
 -- ALTER TABLE `meteo-ingest.weather_data.abuja_hourly`
--- RENAME COLUMN temprature_c TO temperature_c;
+-- RENAME COLUMN temperature_c TO temperature_c;
 --
 -- Then set in dbt_project.yml: legacy_raw_temperature_column: false
 -- (or pass: dbt run --vars '{"legacy_raw_temperature_column": false}')

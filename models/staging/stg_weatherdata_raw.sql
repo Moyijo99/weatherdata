@@ -5,7 +5,7 @@ typed AS (
     SELECT
         CAST(`time` AS TIMESTAMP) AS observed_at,
         {% if var('legacy_raw_temperature_column', true) %}
-        CAST(temprature_c AS FLOAT64) AS temperature_c,
+        CAST(temperature_c AS FLOAT64) AS temperature_c,
         {% else %}
         CAST(temperature_c AS FLOAT64) AS temperature_c,
         {% endif %}
