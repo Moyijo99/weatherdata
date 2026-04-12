@@ -15,10 +15,6 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
-# Set to false after raw.abuja_hourly uses column `temperature_c` (rename or new ingest only).
-vars:
-  legacy_raw_temperature_column: true
-
 models:
   weather_abuja_pl:
     staging:

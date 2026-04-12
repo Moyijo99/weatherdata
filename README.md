@@ -11,7 +11,7 @@ Every hour, this pipeline:
 1. Fetches hourly forecast data for Abuja from the Open-Meteo API
 2. Streams it into a raw BigQuery table exactly as received
 3. Runs dbt transformations that clean, deduplicate, and roll up the data into a mart table
-4. Produces a `logistics_risk_level` signal per calendar day (`Low`, `Moderate`, or `High Risk`) based on precipitation levels
+4. Produces a `precipitation_risk` signal per calendar day (`Low`, `Moderate`, or `High Risk`) based on precipitation thresholds — a concrete, business-interpretable output, not just raw numbers
 
 The mart table is designed to answer questions like:
 
@@ -98,7 +98,7 @@ Daily grain. One row per Lagos calendar date.
 | `min_temp_c` | Minimum temperature |
 | `total_precipitation_mm` | Sum of hourly precipitation |
 | `max_windspeed_kmh` | Peak wind speed |
-| `logistics_risk_level` | `Low Risk` / `Moderate Risk` / `High Risk` |
+| `precipitation_risk` | `Low Risk` / `Moderate Risk` / `High Risk` |
 
 **Risk logic:**
 ```sql
@@ -107,7 +107,7 @@ CASE
     WHEN SUM(precipitation_mm) > 10 THEN 'Moderate Risk'
     WHEN SUM(precipitation_mm) > 5 THEN 'Low Risk'
     ELSE 'No Risk'
-END AS logistics_risk_level
+END AS precipitation_risk
 ```
 
 ---
@@ -122,10 +122,29 @@ Tests are defined in `models/schema.yml` and enforced with `dbt test`:
 | `unique` | `observed_at` | Staging |
 | `not_null` | `date_day` | Mart |
 | `unique` | `date_day` | Mart |
-| `accepted_values` | `logistics_risk_level` | Mart |
+| `accepted_values` | `precipitation_risk` | Mart |
 | Source freshness | `ingested_at` on `raw.abuja_hourly` | Source |
 
 Source freshness is configured in `_sources.yml` — `dbt source freshness` will warn if the raw table hasn't received data within a defined window, catching silent ingestion failures before they reach the mart.
+
+---
+
+## Dashboard
+
+**[View Live Dashboard →](https://lookerstudio.google.com/reporting/6f3bb11f-cebe-4525-8c62-0fda56470fc9)**
+
+![Abuja Weather Intelligence — Logistics Risk Dashboard](assets/dashboard_screenshot.png)
+
+Connected directly to `mart_daily_forecast` in BigQuery. Three charts, one business question:
+
+- **Daily Temperature** — average and peak temperature per day, showing the thermal envelope
+  field operations teams work within
+- **Daily Precipitation (mm)** — total rainfall per day; the primary input to the risk classification
+- **Daily Risk Level** — the operational output: each calendar day classified and ranked by
+  precipitation, filterable by date range
+
+The dashboard is the delivery layer for the pipeline's core output — `precipitation_risk` —
+translating a dbt mart model into something a non-technical operator can act on directly.
 
 ---
 
