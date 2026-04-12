@@ -133,7 +133,7 @@ Source freshness is configured in `_sources.yml` — `dbt source freshness` will
 
 **[View Live Dashboard →](https://lookerstudio.google.com/reporting/6f3bb11f-cebe-4525-8c62-0fda56470fc9)**
 
-![Abuja Weather Intelligence — Logistics Risk Dashboard](assets/dashboard_screenshot.jpg)
+![Abuja Weather Intelligence — Logistics Risk Dashboard](assets/dashboard_screenshot.png)
 
 Connected directly to `mart_daily_forecast` in BigQuery. Three charts, one business question:
 
