@@ -71,18 +71,7 @@ qualify row_number() over (
 ) = 1
 ```
 
-### 2. Legacy column naming (schema drift)
-The raw table was initially loaded with a typo in the column name (`temprature_c` instead of `temperature_c`). Rather than requiring a manual fix before the pipeline could run, a feature flag in `dbt_project.yml` handles both states:
-
-```yaml
-# dbt_project.yml
-vars:
-  legacy_raw_temperature_column: true   # set false after column rename
-```
-
-The staging model reads the right column name based on this flag. This simulates a real-world schema evolution scenario and shows the pipeline degrades gracefully rather than breaking.
-
-### 3. Forecast data, not observations
+### 2.  Forecast data, not observations
 The Open-Meteo API returns **forecast** data, not historical station observations. This distinction matters — forecast values for a past hour may differ from what actually occurred. The mart is named `mart_daily_forecast` deliberately, and this is documented in the data model so any downstream consumer understands what they're querying.
 
 ---
@@ -113,11 +102,12 @@ Daily grain. One row per Lagos calendar date.
 
 **Risk logic:**
 ```sql
-case
-    when total_precipitation_mm > 20 then 'High Risk'
-    when total_precipitation_mm > 5  then 'Moderate Risk'
-    else 'Low Risk'
-end as logistics_risk_level
+CASE
+    WHEN SUM(precipitation_mm) > 20 THEN 'High Risk'
+    WHEN SUM(precipitation_mm) > 10 THEN 'Moderate Risk'
+    WHEN SUM(precipitation_mm) > 5 THEN 'Low Risk'
+    ELSE 'No Risk'
+END AS logistics_risk_level
 ```
 
 ---
@@ -148,27 +138,8 @@ Source freshness is configured in `_sources.yml` — `dbt source freshness` will
 | Warehouse | Google BigQuery |
 | Transformation | dbt Core + dbt-bigquery |
 | Auth | GCP Service Account (JSON key, never committed) |
-
----
-
-## Repository Layout
-
-```
-weatherdataabuja/
-├── ingest.py                               # Fetch + stream to BigQuery
-├── requirements.txt
-├── dbt_project.yml                         # dbt config + feature flags
-├── models/
-│   ├── staging/
-│   │   ├── stg_weatherdata_raw.sql
-│   │   └── _sources.yml                   # Raw source + freshness config
-│   ├── mart/
-│   │   └── mart_daily_forecast.sql
-│   └── schema.yml                          # Column docs + generic tests
-├── analyses/
-│   └── rename_raw_temperature_column.sql  # One-time DDL for column rename
-└── weather_abuja.csv                       # Sample export for reference
-```
+| Orchestration | Airflow, hourly |
+| BI | Looker Studio |
 
 ---
 
@@ -220,11 +191,7 @@ weather_abuja_pl:
 
 Update `database` and `schema` in `models/staging/_sources.yml` to match your project and dataset.
 
-### 4. Handle the legacy column (if applicable)
-
-If your raw table still has `temprature_c` (the typo), leave `legacy_raw_temperature_column: true` in `dbt_project.yml`. After renaming the column (see `analyses/rename_raw_temperature_column.sql`), set it to `false`.
-
-### 5. Run the pipeline
+### 4. Run the pipeline
 
 ```bash
 # Ingest
@@ -239,18 +206,6 @@ dbt test
 # Check source freshness
 dbt source freshness
 ```
-
----
-
-## What's Next
-
-The current state of the project is a working ingestion and transformation layer with tests. The planned next phases are:
-
-**Orchestration** — wrapping the pipeline in an Airflow DAG (via Astronomer) so ingestion and dbt runs are scheduled, monitored, and retried automatically.
-
-**Pre-load data quality with Great Expectations** — validating the API response *before* it touches BigQuery. The current dbt tests catch problems after load; GE would add a gate at the ingestion boundary, which is the right place to stop bad data early.
-
-**BI layer** — a Looker Studio dashboard connected to `mart_daily_forecast`, surfacing the logistics risk signal visually. The mart is already structured for this; the dashboard is the delivery mechanism for the business value the pipeline produces.
 
 ---
 
