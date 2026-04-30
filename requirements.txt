@@ -4,3 +4,4 @@ google-cloud-bigquery>=3.41,<4
 
 # dbt (BigQuery)
 dbt-bigquery>=1.11,<2
+astronomer-cosmos

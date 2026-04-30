@@ -1,0 +1,12 @@
+weather_abuja_pl:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: service-account
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS', '/usr/local/airflow/meteo-ingest-ce3765c5326f.json') }}"
+      project: meteo-ingest
+      dataset: weather_data
+      location: US
+      threads: 4
+      timeout_seconds: 300

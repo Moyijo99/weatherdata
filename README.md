@@ -42,6 +42,12 @@ flowchart LR
         RAW --> STG
         STG --> MART
     end
+
+    subgraph orchestration [Orchestration]
+        AIR[Airflow / Astronomer]
+        COSMOS[Cosmos — dbt tasks]
+        AIR --> COSMOS
+    end
 ```
 
 ### Why this architecture?
@@ -53,6 +59,7 @@ flowchart LR
 | **BigQuery over Postgres** | This is an analytical workload — columnar storage and serverless scaling make BigQuery the right fit. Postgres would work at this volume but introduces infrastructure management with no benefit. |
 | **dbt over raw SQL scripts** | Version-controlled, testable, self-documenting transformations. Every model is a node in a DAG with lineage you can inspect. |
 | **Africa/Lagos timezone for daily grain** | Daily rollups bucketed in UTC would misalign with local operational decisions. `DATE(observed_at, 'Africa/Lagos')` ensures the date means what a Nigerian operator would expect it to mean. |
+| **Cosmos over BashOperator** | BashOperator runs the entire dbt project as one task. Cosmos parses the dbt DAG and creates individual Airflow tasks per model and test — giving granular failure visibility, partial retries, and lineage in the Airflow UI. |
 
 ---
 
@@ -157,7 +164,7 @@ translating a dbt mart model into something a non-technical operator can act on 
 | Warehouse | Google BigQuery |
 | Transformation | dbt Core + dbt-bigquery |
 | Auth | GCP Service Account (JSON key, never committed) |
-| Orchestration | Airflow, hourly |
+| Orchestration | Airflow via Astronomer + Cosmos, hourly |
 | BI | Looker Studio |
 
 ---
